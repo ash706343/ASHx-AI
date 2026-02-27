@@ -1,6 +1,6 @@
 import os
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 from typing import Optional
 import psycopg2
 from dotenv import load_dotenv
@@ -47,8 +47,19 @@ def get_db_connection():
             if not ipv4:
                 raise primary_error
 
-            # Retry with hostaddr to force IPv4 when IPv6 routing is unavailable.
-            conn = psycopg2.connect(db_url, hostaddr=ipv4, connect_timeout=10)
+            # Retry with explicit params using IPv4 when IPv6 routing is unavailable.
+            query = parse_qs(parsed.query or "")
+            sslmode = query.get("sslmode", [None])[-1]
+            conn_kwargs = {
+                "dbname": parsed.path.lstrip("/") or None,
+                "user": parsed.username,
+                "password": parsed.password,
+                "host": ipv4,
+                "port": parsed.port or 5432,
+                "sslmode": sslmode,
+                "connect_timeout": 10,
+            }
+            conn = psycopg2.connect(**{k: v for k, v in conn_kwargs.items() if v is not None})
             conn.autocommit = True
             return conn
     except Exception as e:

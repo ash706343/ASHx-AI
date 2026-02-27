@@ -105,6 +105,11 @@ def root():
     return {"status": "ok", "message": "ASHx backend is running"}
 
 
+@app.head("/")
+def root_head():
+    return
+
+
 # ---------- AI ENDPOINT ----------
 @app.post("/ask")
 def ask(req: ChatRequest):
