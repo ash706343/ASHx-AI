@@ -1,9 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Optional
 from datetime import datetime
-import psycopg2
 import threading
 import time
 import os
@@ -16,10 +15,13 @@ load_dotenv()
 
 app = FastAPI()
 
+frontend_origin = os.getenv("FRONTEND_URL")
+cors_origins = [frontend_origin] if frontend_origin else ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allows all origins
-    allow_credentials=True,
+    allow_origins=cors_origins,
+    allow_credentials=bool(frontend_origin),
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
@@ -33,6 +35,8 @@ def startup_event():
     threading.Thread(target=reminder_loop, daemon=True).start()
     try:
         init_conn = get_db_connection()
+        if not init_conn:
+            raise RuntimeError("Database unavailable during startup.")
         init_cursor = init_conn.cursor()
         init_cursor.execute("""
         CREATE TABLE IF NOT EXISTS tasks (
@@ -61,6 +65,9 @@ def reminder_loop():
     while True:
         try:
             conn = get_db_connection()
+            if not conn:
+                time.sleep(60)
+                continue
             cursor = conn.cursor()
             now = datetime.now().strftime("%H:%M")
             cursor.execute(
@@ -84,6 +91,15 @@ def reminder_loop():
         time.sleep(60)
 
 
+@app.get("/health")
+def health_check():
+    conn = get_db_connection()
+    if not conn:
+        return {"status": "degraded", "database": "disconnected"}
+    conn.close()
+    return {"status": "ok", "database": "connected"}
+
+
 # ---------- AI ENDPOINT ----------
 @app.post("/ask")
 def ask(req: ChatRequest):
@@ -96,6 +112,8 @@ def ask(req: ChatRequest):
             time_part = msg.split("at")[1].strip()
 
             conn = get_db_connection()
+            if not conn:
+                raise HTTPException(status_code=503, detail="Database connection is unavailable.")
             cursor = conn.cursor()
             cursor.execute(
                 "INSERT INTO tasks (task, remind_at) VALUES (%s, %s)",
@@ -107,6 +125,8 @@ def ask(req: ChatRequest):
             return {
                 "reply": f"✅ Got it. I’ll remind you to **{task}** at **{time_part}**."
             }
+        except HTTPException as e:
+            return {"reply": f"Database error: {e.detail}"}
         except Exception as e:
             print(f"Remind parser error: {e}")
             return {
