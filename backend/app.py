@@ -100,6 +100,11 @@ def health_check():
     return {"status": "ok", "database": "connected"}
 
 
+@app.get("/")
+def root():
+    return {"status": "ok", "message": "ASHx backend is running"}
+
+
 # ---------- AI ENDPOINT ----------
 @app.post("/ask")
 def ask(req: ChatRequest):
